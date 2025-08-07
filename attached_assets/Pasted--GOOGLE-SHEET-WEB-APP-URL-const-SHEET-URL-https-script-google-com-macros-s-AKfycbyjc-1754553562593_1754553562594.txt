@@ -1,0 +1,566 @@
+// --- GOOGLE SHEET WEB APP URL ---
+const SHEET_URL = "https://script.google.com/macros/s/AKfycbyjc5rSdo_PPxmagclDzf-0BAsP9nckIcbOCsWj0jQnerbeK9wW38oSeOcVhbeBLmCe/exec";
+
+// --- Pages mapping ---
+const pages = {
+  main: renderMainPage,
+  orders: renderOrdersPage,
+  staff: renderStaffBillbookPage,
+  status: renderEntryStatusPage,
+  delivery: renderDeliveryPage
+};
+
+// --- Global App State ---
+window.appState = {
+  orders: [],
+  staffBook: {}, // { billbookNumber: staffName }
+  entryStatuses: {} // { sno: [ { product, package } ] }
+};
+
+// ------------ GOOGLE SHEETS INTEGRATION ---------------
+async function fetchSheetData() {
+  console.log("Fetching data from Google Sheet...");
+  try {
+    const res = await fetch(SHEET_URL + "?action=getOrders");
+    const data = await res.json();
+    window.appState.orders = data.orders || [];
+    window.appState.staffBook = data.staffBook || {};
+    window.appState.entryStatuses = data.entryStatuses || {};
+    // Save a local copy for offline fallback
+    localStorage.setItem("orders", JSON.stringify(window.appState.orders));
+    localStorage.setItem("staffBook", JSON.stringify(window.appState.staffBook));
+    localStorage.setItem("entryStatuses", JSON.stringify(window.appState.entryStatuses));
+  } catch (e) {
+    console.error("Failed to fetch from sheet, loading from localStorage.", e);
+    window.appState.orders = JSON.parse(localStorage.getItem("orders") || "[]");
+    window.appState.staffBook = JSON.parse(localStorage.getItem("staffBook") || "{}");
+    window.appState.entryStatuses = JSON.parse(localStorage.getItem("entryStatuses") || "{}");
+  }
+}
+
+async function updateLocalState(type, data) {
+    const arr = window.appState[type];
+    const idx = arr.findIndex(x => x.sno == data.sno);
+    if (idx >= 0) arr[idx] = data;
+    else arr.push(data);
+    localStorage.setItem(type, JSON.stringify(arr));
+}
+
+async function saveOrderToSheet(order) {
+  try {
+    await fetch(SHEET_URL + "?action=addOrder", {
+      method: "POST",
+      body: JSON.stringify(order),
+      headers: { "Content-Type": "application/json" }
+    });
+  } catch (e) {
+    console.error("Failed to save to sheet, saving to localStorage.", e);
+  } finally {
+    // Always update local state for immediate UI feedback
+    updateLocalState('orders', order);
+  }
+}
+
+async function saveStaffBookToSheet(staffBook) {
+  try {
+    await fetch(SHEET_URL + "?action=addStaffBook", {
+      method: "POST",
+      body: JSON.stringify(staffBook),
+      headers: { "Content-Type": "application/json" }
+    });
+  } catch (e) {
+    console.error("Failed to save to sheet, saving to localStorage.", e);
+  } finally {
+    window.appState.staffBook = staffBook;
+    localStorage.setItem("staffBook", JSON.stringify(staffBook));
+  }
+}
+
+async function saveEntryStatusToSheet(sno, newStatus) {
+    if (!window.appState.entryStatuses[sno]) {
+        window.appState.entryStatuses[sno] = [];
+    }
+    window.appState.entryStatuses[sno].push(newStatus);
+  try {
+    await fetch(SHEET_URL + "?action=addEntryStatus", {
+      method: "POST",
+      body: JSON.stringify(window.appState.entryStatuses),
+      headers: { "Content-Type": "application/json" }
+    });
+  } catch (e) {
+    console.error("Failed to save to sheet, saving to localStorage.", e);
+  } finally {
+    localStorage.setItem("entryStatuses", JSON.stringify(window.appState.entryStatuses));
+  }
+}
+
+// ----------- PAGE RENDERERS ------------------
+
+function renderMainPage(main) {
+  main.innerHTML = `
+    <h2>Orders List</h2>
+    <div class="filter-bar">
+      <label>Search S No: <input type="text" id="search-sno" placeholder="S No"></label>
+      <label>Product: <input type="text" id="filter-product" placeholder="Type product"/></label>
+      <label>Status:
+        <select id="filter-delivery-status">
+          <option value="">Any</option>
+          <option value="delivered">Delivered</option>
+          <option value="pending">Pending</option>
+          <option value="canceled">Canceled</option>
+        </select>
+      </label>
+      <label>Date:
+        <select id="filter-date">
+          <option value="">Any</option>
+          <option value="today">Today</option>
+          <option value="tomorrow">Tomorrow</option>
+          <option value="thisweek">Current Week</option>
+          <option value="thismonth">Current Month</option>
+          <option value="asc">Ascending</option>
+          <option value="desc">Descending</option>
+        </select>
+      </label>
+      <button class="btn-action" id="btn-filter">Apply Filter</button>
+    </div>
+    <div id="orders-table-container"></div>
+  `;
+
+  const tableContainer = main.querySelector("#orders-table-container");
+
+  document.getElementById("btn-filter").onclick = function() {
+    const snoVal = document.getElementById("search-sno").value.trim();
+    const productVal = document.getElementById("filter-product").value.trim().toLowerCase();
+    const statusVal = document.getElementById("filter-delivery-status").value;
+    const dateVal = document.getElementById("filter-date").value;
+
+    let filteredOrders = [...window.appState.orders]; // Create a copy to sort
+
+    if (snoVal) filteredOrders = filteredOrders.filter(o => String(o.sno).includes(snoVal));
+    if (productVal) filteredOrders = filteredOrders.filter(o => o.product && o.product.toLowerCase().includes(productVal));
+    if (statusVal) filteredOrders = filteredOrders.filter(o => o.deliveryStatus === statusVal);
+
+    // Date filter logic
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Normalize today's date
+
+    if (dateVal && !['asc', 'desc'].includes(dateVal)) {
+        filteredOrders = filteredOrders.filter(o => {
+            if (!o.dDate) return false;
+            const dDate = new Date(o.dDate);
+            if (isNaN(dDate.getTime())) return false; // Invalid date check
+
+            if (dateVal === "today") return dDate.toDateString() === today.toDateString();
+            if (dateVal === "tomorrow") {
+                const tomorrow = new Date(today);
+                tomorrow.setDate(today.getDate() + 1);
+                return dDate.toDateString() === tomorrow.toDateString();
+            }
+            if (dateVal === "thisweek") {
+                const weekStart = new Date(today);
+                weekStart.setDate(today.getDate() - today.getDay());
+                const weekEnd = new Date(weekStart);
+                weekEnd.setDate(weekStart.getDate() + 6);
+                return dDate >= weekStart && dDate <= weekEnd;
+            }
+            if (dateVal === "thismonth") {
+                return dDate.getMonth() === today.getMonth() && dDate.getFullYear() === today.getFullYear();
+            }
+            return true;
+        });
+    }
+    
+    // Sort logic, can be applied with or without a date filter
+    if (dateVal === "asc") {
+        filteredOrders.sort((a, b) => new Date(a.dDate) - new Date(b.dDate));
+    } else if (dateVal === "desc") {
+        filteredOrders.sort((a, b) => new Date(b.dDate) - new Date(a.dDate));
+    }
+
+    renderOrdersTable(tableContainer, filteredOrders);
+  };
+  
+  // Initial render of the table
+  renderOrdersTable(tableContainer, window.appState.orders);
+}
+
+
+function renderOrdersTable(container, orders) {
+  // Clear previous table before rendering new one
+  container.innerHTML = "";
+
+  if (!orders || orders.length === 0) {
+      container.innerHTML = "<p>No orders found.</p>";
+      return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "orders-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>S No</th><th>Delivery Date</th><th>Product</th>
+        <th>Staff</th><th>Entry Statuses</th><th>Delivery Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${
+        orders.map(order => {
+          const entryStatuses = window.appState.entryStatuses[order.sno] || [];
+          const statuses = entryStatuses.map(es => `${es.product} ${es.package?"✔️":"❌"}`).join(" | ");
+          return `
+            <tr class="${rowColorClass(order.deliveryStatus)}" data-sno="${order.sno}">
+              <td>${order.sno}</td>
+              <td>${order.dDate || 'N/A'}</td>
+              <td>${order.product}</td>
+              <td>${order.staffName || ""}</td>
+              <td>${statuses || 'None'}</td>
+              <td>${statusLabel(order.deliveryStatus)}</td>
+              <td>
+                <button class="small-btn details-btn" data-sno="${order.sno}">Details</button>
+                <button class="small-btn edit-btn" data-sno="${order.sno}">Edit</button>
+              </td>
+            </tr>
+          `;
+        }).join("")
+      }
+    </tbody>
+  `;
+
+  // Use event delegation for row clicks and button clicks
+  table.onclick = (e) => {
+    const sno = e.target.getAttribute('data-sno');
+    if (!sno) return;
+    
+    if (e.target.classList.contains('details-btn')) {
+      showOrderDetails(sno, document.getElementById('main'));
+    } else if (e.target.classList.contains('edit-btn')) {
+      editOrderDetails(sno);
+    } else if (e.target.closest('tr')) { // Click on row itself
+      showOrderDetails(sno, document.getElementById('main'));
+    }
+  };
+
+  container.appendChild(table);
+}
+
+function showOrderDetails(sno, main) {
+  const prevDetails = main.querySelector(".details-section");
+  if (prevDetails) prevDetails.remove();
+
+  const order = window.appState.orders.find(o => String(o.sno) === String(sno));
+  if(!order) return;
+  
+  const entryStatuses = window.appState.entryStatuses[sno] || [];
+  const statuses = entryStatuses.map(es => `${es.product} ${es.package?"✔️":"❌"}`).join(" | ");
+  
+  const details = document.createElement("div");
+  details.className = "details-section";
+  details.innerHTML = `
+    <h3>Order Details</h3>
+    <p><strong>S No:</strong> ${order.sno}</p>
+    <p><strong>Product:</strong> ${order.product}</p>
+    <p><strong>Additional:</strong> ${order.additional}</p>
+    <p><strong>Order Date:</strong> ${order.oDate}</p>
+    <p><strong>Delivery Date:</strong> ${order.dDate}</p>
+    <p><strong>Telephone:</strong> ${order.tel}</p>
+    <p><strong>Staff:</strong> ${order.staffName}</p>
+    <p><strong>Entry Statuses:</strong> ${statuses || 'None'}</p>
+    <p><strong>Delivery Status:</strong> ${statusLabel(order.deliveryStatus)}</p>
+    <p><strong>Image:</strong>${order.link ? `<br><img src="${order.link}" alt="Product Image"/><br><a href="${order.link}" download class="btn-action">Download Image</a>` : "Not Available"}</p>
+    <button class="btn-action" onclick="this.parentElement.remove()">Close Details</button>
+    <button class="btn-action" onclick="editOrderDetails('${order.sno}')">Edit Details</button>
+  `;
+  // Insert details after the filter bar
+  main.querySelector('.filter-bar').insertAdjacentElement('afterend', details);
+  details.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function editOrderDetails(sno) {
+  // Pass the SNo to the showPage function to populate the form
+  showPage('orders', { snoToEdit: sno });
+}
+
+function renderOrdersPage(main, params = {}) {
+  main.innerHTML = `<h2>Add/Update Order</h2>`;
+  const form = document.createElement("form");
+  form.className = "form-section";
+  form.innerHTML = `
+    <div class="input-group"><label>S No</label><input type="number" id="order-sno" required></div>
+    <div class="input-group"><label>Product</label><input type="text" id="order-product" required placeholder="Type product name"/></div>
+    <div class="input-group"><label>Additional</label><input type="text" id="order-additional"></div>
+    <div class="input-group"><label>Order Date</label><input type="date" id="order-o-date" required></div>
+    <div class="input-group"><label>Delivery Date</label><input type="date" id="order-d-date" required></div>
+    <div class="input-group"><label>Telephone</label><input type="tel" id="order-telephone" required></div>
+    <div class="input-group"><label>Image Link</label><input type="url" id="order-link"></div>
+    <div class="input-group"><label>Delivery Status</label>
+      <select id="order-delivery-status">
+        <option value="pending">Pending</option>
+        <option value="delivered">Delivered</option>
+        <option value="canceled">Canceled</option>
+      </select>
+    </div>
+    <button type="submit">Save Order</button>
+  `;
+  main.appendChild(form);
+
+  // If we are editing an order, populate the form
+  if (params.snoToEdit) {
+    const order = window.appState.orders.find(o => String(o.sno) === String(params.snoToEdit));
+    if (order) {
+      form.querySelector("#order-sno").value = order.sno;
+      form.querySelector("#order-product").value = order.product;
+      form.querySelector("#order-additional").value = order.additional;
+      form.querySelector("#order-o-date").value = order.oDate;
+      form.querySelector("#order-d-date").value = order.dDate;
+      form.querySelector("#order-telephone").value = order.tel;
+      form.querySelector("#order-link").value = order.link;
+      form.querySelector("#order-delivery-status").value = order.deliveryStatus;
+    }
+  }
+
+  form.onsubmit = async function(e) {
+    e.preventDefault();
+    const order = {
+      sno: form.querySelector("#order-sno").value,
+      product: form.querySelector("#order-product").value,
+      additional: form.querySelector("#order-additional").value,
+      oDate: form.querySelector("#order-o-date").value,
+      dDate: form.querySelector("#order-d-date").value,
+      tel: form.querySelector("#order-telephone").value,
+      link: form.querySelector("#order-link").value,
+      deliveryStatus: form.querySelector("#order-delivery-status").value,
+      staffName: getStaffForSno(form.querySelector("#order-sno").value)
+    };
+    
+    await saveOrderToSheet(order);
+    alert("Order saved!");
+    showPage("main"); // Go back to the main page to see the updated list
+  };
+}
+
+function renderStaffBillbookPage(main) {
+  main.innerHTML = `<h2>Staff/Billbook Assignment</h2>`;
+  const addDiv = document.createElement("div");
+  addDiv.className = "form-section";
+  addDiv.innerHTML = `
+    <div class="input-group">
+      <label>Billbook Number Range</label>
+      <input type="text" id="new-billbook" placeholder="e.g. 301-350"/>
+      <label>Staff Name</label>
+      <input type="text" id="new-staff" placeholder="Staff Name"/>
+      <button class="btn-action" id="btn-add-billbook">Add Billbook</button>
+    </div>
+  `;
+  addDiv.querySelector("#btn-add-billbook").onclick = async function() {
+    const billbook = addDiv.querySelector("#new-billbook").value.trim();
+    const staff = addDiv.querySelector("#new-staff").value.trim();
+    if(!billbook || !staff) return alert("Enter both billbook range and staff name.");
+    if(!/^\d+-\d+$/.test(billbook)) return alert("Billbook range must be in 'start-end' format, e.g., 301-350.");
+    
+    const newStaffBook = { ...window.appState.staffBook, [billbook]: staff };
+    await saveStaffBookToSheet(newStaffBook);
+    alert("Billbook added!");
+    showPage("staff"); // Reload page to show new entry
+  };
+  main.appendChild(addDiv);
+
+  const listDiv = document.createElement("div");
+  listDiv.className = "billbook-list";
+  listDiv.innerHTML = `<h3>Current Assignments</h3>`;
+  Object.entries(window.appState.staffBook).forEach(([billbook, staff]) => {
+    const item = document.createElement("div");
+    item.className = "billbook-item";
+    item.innerHTML = `<input value="${billbook}" disabled/> assigned to <span><strong>${staff}</strong></span>`;
+    listDiv.appendChild(item);
+  });
+  main.appendChild(listDiv);
+}
+
+function renderEntryStatusPage(main) {
+  main.innerHTML = `<h2>Entry Status</h2>`;
+  const form = document.createElement("form");
+  form.className = "form-section";
+  form.innerHTML = `
+    <div class="input-group"><label>S No</label><input type="number" id="status-sno" required></div>
+    <div class="input-group"><label>Product</label>
+      <select id="status-product" required>
+        <option value="sherwani">Sherwani</option>
+        <option value="indo western">Indo Western</option>
+        <option value="jodhpuri">Jodhpuri</option>
+        <option value="coat pant">Coat Pant</option>
+      </select>
+    </div>
+    <div class="input-group">
+      <label>Package?</label>
+      <select id="status-package">
+        <option value="yes">Yes</option>
+        <option value="no" selected>No</option>
+      </select>
+    </div>
+    <button type="submit">Add Entry Status</button>
+  `;
+  main.appendChild(form);
+
+  form.onsubmit = async function(e) {
+    e.preventDefault();
+    const sno = form.querySelector("#status-sno").value;
+    const newStatus = {
+      product: form.querySelector("#status-product").value,
+      package: form.querySelector("#status-package").value === "yes"
+    };
+
+    if (!window.appState.orders.find(o => o.sno == sno)) {
+        return alert(`Order S No ${sno} not found. Please add the order first.`);
+    }
+
+    await saveEntryStatusToSheet(sno, newStatus);
+    alert("Entry status added!");
+    form.reset(); // Clear the form
+    renderEntryStatusTable(main); // Re-render the table below
+  };
+  
+  // Create a container for the table to re-render it easily
+  const tableContainer = document.createElement('div');
+  main.appendChild(tableContainer);
+  renderEntryStatusTable(main);
+}
+
+function renderEntryStatusTable(main) {
+    let container = main.querySelector('.orders-table-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'orders-table-container';
+        main.appendChild(container);
+    }
+    container.innerHTML = ''; // Clear previous content
+
+    const table = document.createElement("table");
+    table.className = "orders-table";
+    table.innerHTML = `
+        <thead><tr><th>S No</th><th>Products Statuses</th></tr></thead>
+        <tbody>
+        ${Object.entries(window.appState.entryStatuses).map(([sno, arr]) => `
+            <tr>
+            <td>${sno}</td>
+            <td>${arr.map(entry => `${entry.product} ${entry.package ? "✔️" : "❌"}`).join(" | ")}</td>
+            </tr>
+        `).join("")}
+        </tbody>
+    `;
+    container.appendChild(table);
+}
+
+
+async function renderDeliveryPage(main) {
+  main.innerHTML = `<h2>Update Delivery Status</h2>`;
+  const form = document.createElement("form");
+  form.className = "form-section";
+  form.innerHTML = `
+    <div class="input-group">
+        <label>Enter S No to update</label>
+        <input type="number" id="delivery-sno" required>
+    </div>
+    <button type="submit">Show Order Details</button>
+    <div id="delivery-details" style="margin-top: 20px;"></div>
+  `;
+  main.appendChild(form);
+
+  form.onsubmit = async function(e) {
+    e.preventDefault();
+    const sno = form.querySelector("#delivery-sno").value;
+    const order = window.appState.orders.find(o => String(o.sno) === String(sno));
+    const detailsDiv = form.querySelector("#delivery-details");
+
+    if(!order) {
+      detailsDiv.innerHTML = `<p style="color: red;">Order with S No ${sno} not found.</p>`;
+      return;
+    }
+
+    const entryStatuses = window.appState.entryStatuses[sno] || [];
+    const statuses = entryStatuses.map(es => `${es.product} ${es.package?"✔️":"❌"}`).join(" | ");
+    detailsDiv.innerHTML = `
+      <div class="details-section">
+        <h3>Order Details</h3>
+        <p><strong>S No:</strong> ${order.sno}</p>
+        <p><strong>Product:</strong> ${order.product}</p>
+        <p><strong>Delivery Date:</strong> ${order.dDate}</p>
+        <p><strong>Entry Statuses:</strong> ${statuses || 'None'}</p>
+        <hr>
+        <div class="input-group">
+          <label><strong>Update Delivery Status</strong></label>
+          <select id="delivery-status-select">
+            <option value="delivered" ${order.deliveryStatus==="delivered"?"selected":""}>Delivered</option>
+            <option value="pending" ${order.deliveryStatus==="pending"?"selected":""}>Pending</option>
+            <option value="canceled" ${order.deliveryStatus==="canceled"?"selected":""}>Canceled</option>
+          </select>
+        </div>
+        <button class="btn-action" id="btn-update-delivery">Update Status</button>
+      </div>
+    `;
+    detailsDiv.scrollIntoView({behavior:"smooth", block: "center"});
+
+    document.getElementById("btn-update-delivery").onclick = async function() {
+      order.deliveryStatus = document.getElementById("delivery-status-select").value;
+      await saveOrderToSheet(order);
+      alert("Delivery status updated!");
+      showPage("delivery");
+    };
+  };
+}
+
+// --------- Utility Functions ---------
+function getStaffForSno(sno) {
+  for (const billbook in window.appState.staffBook) {
+    if (withinRange(sno, billbook)) {
+      return window.appState.staffBook[billbook];
+    }
+  }
+  return "";
+}
+
+function withinRange(val, range) {
+  if(!range.includes("-")) return false;
+  const [from, to] = range.split("-").map(Number);
+  if (isNaN(from) || isNaN(to)) return false;
+  return +val >= from && +val <= to;
+}
+
+function rowColorClass(status) {
+  if(status==="delivered") return "order-delivered";
+  if(status==="pending") return "order-pending";
+  if(status==="canceled") return "order-canceled";
+  return "";
+}
+
+function statusLabel(status) {
+  if(status==="delivered") return "Delivered ✅";
+  if(status==="pending") return "Pending ⏳";
+  if(status==="canceled") return "Canceled ❌";
+  return "N/A";
+}
+
+// ------- App Initialization and Navigation -------
+document.addEventListener("DOMContentLoaded", async function() {
+  document.getElementById("nav-main").onclick = () => showPage("main");
+  document.getElementById("nav-orders").onclick = () => showPage("orders");
+  document.getElementById("nav-staff").onclick = () => showPage("staff");
+  document.getElementById("nav-status").onclick = () => showPage("status");
+  document.getElementById("nav-delivery").onclick = () => showPage("delivery");
+  
+  const main = document.getElementById("main");
+  main.innerHTML = "<h2>Loading data, please wait...</h2>";
+  await fetchSheetData();
+  showPage("main");
+});
+
+function showPage(page, params = {}) {
+  document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("active"));
+  document.getElementById("nav-" + page).classList.add("active");
+  
+  const main = document.getElementById("main");
+  main.innerHTML = ""; // Clear the main content area
+  
+  pages[page](main, params); // Render the new page
+}

@@ -1,0 +1,265 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(216, 25%, 15%);
+  --card: hsl(180 6.6667% 97.0588%);
+  --card-foreground: hsl(216, 25%, 15%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(216, 25%, 15%);
+  --primary: hsl(216, 34%, 31%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(216, 25%, 15%);
+  --secondary-foreground: hsl(0 0% 100%);
+  --muted: hsl(213, 10%, 95%);
+  --muted-foreground: hsl(216, 15%, 52%);
+  --accent: hsl(211, 51%, 93%);
+  --accent-foreground: hsl(216, 34%, 31%);
+  --destructive: hsl(356, 91%, 54%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --border: hsl(201, 30%, 91%);
+  --input: hsl(200, 23%, 97%);
+  --ring: hsl(216, 34%, 31%);
+  
+  /* Custom RAJMAHAL colors */
+  --navy-dark: hsl(216, 25%, 15%);
+  --navy-medium: hsl(215, 33%, 23%);
+  --navy-light: hsl(216, 34%, 31%);
+  --bg-main: hsl(215, 30%, 96%);
+  --text-secondary: hsl(217, 32%, 67%);
+  --border-light: hsl(201, 30%, 85%);
+  --bg-light: hsl(213, 10%, 97%);
+  --shadow-color: hsl(211, 26%, 90%);
+  
+  /* Order status colors */
+  --order-delivered-bg: hsl(137, 72%, 90%);
+  --order-delivered-text: hsl(137, 72%, 25%);
+  --order-pending-bg: hsl(48, 100%, 89%);
+  --order-pending-text: hsl(45, 100%, 33%);
+  --order-canceled-bg: hsl(0, 72%, 90%);
+  --order-canceled-text: hsl(0, 70%, 35%);
+  
+  --font-sans: 'Inter', 'Segoe UI', Arial, sans-serif;
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: hsl(216, 25%, 15%);
+  --foreground: hsl(0 0% 100%);
+  --card: hsl(215, 33%, 23%);
+  --card-foreground: hsl(0 0% 100%);
+  --popover: hsl(216, 25%, 15%);
+  --popover-foreground: hsl(0 0% 100%);
+  --primary: hsl(216, 34%, 31%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(217, 32%, 67%);
+  --secondary-foreground: hsl(216, 25%, 15%);
+  --muted: hsl(216, 25%, 10%);
+  --muted-foreground: hsl(217, 10%, 46%);
+  --accent: hsl(216, 70%, 8%);
+  --accent-foreground: hsl(217, 32%, 67%);
+  --destructive: hsl(356, 91%, 54%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --border: hsl(215, 5%, 15%);
+  --input: hsl(208, 28%, 18%);
+  --ring: hsl(216, 34%, 31%);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-bg-main text-foreground;
+    font-family: var(--font-sans);
+    background: var(--bg-main);
+    margin: 0;
+    padding: 0;
+  }
+}
+
+@layer components {
+  .order-delivered {
+    background: var(--order-delivered-bg) !important;
+    color: var(--order-delivered-text) !important;
+  }
+  
+  .order-pending {
+    background: var(--order-pending-bg) !important;
+    color: var(--order-pending-text) !important;
+  }
+  
+  .order-canceled {
+    background: var(--order-canceled-bg) !important;
+    color: var(--order-canceled-text) !important;
+  }
+
+  .nav-btn-active {
+    background: var(--navy-light);
+    color: white;
+  }
+
+  .nav-btn-inactive {
+    color: var(--text-secondary);
+  }
+
+  .nav-btn-inactive:hover {
+    background: var(--navy-light);
+    color: white;
+  }
+
+  .orders-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--bg-light);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px var(--shadow-color);
+  }
+
+  .orders-table th,
+  .orders-table td {
+    border: 1px solid var(--shadow-color);
+    padding: 9px 10px;
+    text-align: center;
+    font-size: 1em;
+    transition: background 0.2s, color 0.2s;
+  }
+
+  .orders-table th {
+    background: var(--navy-light);
+    color: white;
+    font-weight: 600;
+  }
+
+  .orders-table tr:nth-child(even) {
+    background: var(--bg-light);
+  }
+
+  .orders-table tr:hover {
+    background: hsl(211, 51%, 93%);
+    cursor: pointer;
+  }
+
+  .form-section {
+    background: var(--bg-light);
+    padding: 18px 22px;
+    border-radius: 10px;
+    border: 1px solid var(--border-light);
+    box-shadow: 0 1px 7px var(--shadow-color);
+    margin-bottom: 24px;
+  }
+
+  .details-section {
+    background: var(--bg-light);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    box-shadow: 0 1px 7px var(--shadow-color);
+    max-width: 660px;
+  }
+
+  .details-section img {
+    max-width: 320px;
+    max-height: 220px;
+    border: 2px solid var(--navy-light);
+    margin-top: 10px;
+    border-radius: 5px;
+    background: white;
+  }
+
+  .filter-bar {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+    padding: 16px;
+    background: var(--bg-light);
+    border-radius: 8px;
+    border: 1px solid var(--border-light);
+  }
+
+  .filter-bar input,
+  .filter-bar select {
+    padding: 7px 10px;
+    border: 1px solid var(--border-light);
+    border-radius: 5px;
+    font-size: 1em;
+    background: white;
+    color: var(--navy-light);
+    min-width: 120px;
+  }
+
+  .filter-bar label {
+    font-weight: 500;
+    margin-right: 4px;
+    color: var(--navy-light);
+    font-size: 0.875rem;
+  }
+
+  .btn-action {
+    background: var(--navy-light);
+    color: white;
+    border: none;
+    padding: 10px 22px;
+    font-size: 1em;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    box-shadow: 0 1px 8px var(--shadow-color);
+    transition: background 0.2s;
+  }
+
+  .btn-action:hover {
+    background: var(--navy-dark);
+  }
+
+  .small-btn {
+    background: var(--navy-light);
+    color: white;
+    border: none;
+    padding: 4px 12px;
+    font-size: 0.9em;
+    border-radius: 6px;
+    margin-left: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    box-shadow: 0 1px 4px var(--shadow-color);
+    transition: background 0.2s;
+  }
+
+  .small-btn:hover {
+    background: var(--navy-dark);
+  }
+
+  .billbook-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    padding: 12px;
+    background: white;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+  }
+
+  .billbook-item input {
+    width: 100px;
+  }
+}
+
+@media (max-width: 600px) {
+  .details-section {
+    padding: 12px 8px;
+  }
+  
+  .form-section {
+    padding: 12px 8px;
+  }
+}

@@ -1,0 +1,268 @@
+/**
+ * @license
+ * Copyright 2024 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// --- CONFIGURATION ---
+const SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
+const ORDERS_SHEET_NAME = "Orders";
+const STAFF_SHEET_NAME = "StaffBook";
+const STATUS_SHEET_NAME = "EntryStatus";
+
+// --- MAIN HANDLERS ---
+
+/**
+ * Handles GET requests to the web app.
+ * Used to fetch all initial data for the application.
+ * @param {object} e - The event parameter from the GET request.
+ * @returns {ContentService.TextOutput} JSON object containing all data.
+ */
+function doGet(e) {
+  // Fix: Provide a default event object for testing from the editor.
+  // The 'e' object is only provided when the script is run as a web app.
+  if (!e || !e.parameter) {
+    e = {
+      parameter: {
+        action: 'getOrders' // Default action for testing
+      }
+    };
+  }
+
+  const action = e.parameter.action;
+
+  if (action === 'getOrders') {
+    const data = {
+      orders: getSheetDataAsJson(ORDERS_SHEET_NAME),
+      staffBook: getStaffBookAsObject(),
+      entryStatuses: getEntryStatusAsObject()
+    };
+    return ContentService.createTextOutput(JSON.stringify(data))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
+      message: 'Invalid action'
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * Handles POST requests to the web app.
+ * Used for adding/updating orders, staff assignments, and entry statuses.
+ * @param {object} e - The event parameter from the POST request.
+ * @returns {ContentService.TextOutput} JSON object with a success or error status.
+ */
+function doPost(e) {
+  // Fix: Provide a default event object for testing from the editor.
+  if (!e || !e.parameter) {
+    e = {
+      parameter: {
+        action: 'addOrder' // Provide a default action for testing
+      },
+      postData: {
+        // Provide mock data for testing to avoid errors
+        contents: JSON.stringify({ sno: 'test', product: 'test product' })
+      }
+    };
+  }
+
+  const action = e.parameter.action;
+  const postData = JSON.parse(e.postData.contents);
+
+  try {
+    switch (action) {
+      case 'addOrder':
+        addOrUpdateOrder(postData);
+        break;
+      case 'addStaffBook':
+        updateStaffBook(postData);
+        break;
+      case 'addEntryStatus':
+        updateEntryStatuses(postData);
+        break;
+      default:
+        return ContentService.createTextOutput(JSON.stringify({
+            status: 'error',
+            message: 'Invalid action'
+          }))
+          .setMimeType(ContentService.MimeType.JSON);
+    }
+    return ContentService.createTextOutput(JSON.stringify({
+        status: 'success',
+        action: action
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
+        message: error.message,
+        stack: error.stack
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+
+// --- DATA RETRIEVAL FUNCTIONS ---
+
+/**
+ * Converts a sheet's data into an array of JSON objects.
+ * Assumes the first row of the sheet is the header row.
+ * @param {string} sheetName - The name of the sheet to read.
+ * @returns {Array<Object>} An array of objects representing the rows.
+ */
+function getSheetDataAsJson(sheetName) {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(sheetName);
+  if (!sheet) return [];
+
+  const dataRange = sheet.getDataRange();
+  const values = dataRange.getValues();
+  if (values.length < 2) return []; // Return empty if only header exists
+
+  const headers = values.shift().map(String); // Get headers and remove from values
+  return values.map(row => {
+    const obj = {};
+    headers.forEach((header, index) => {
+      obj[header] = row[index];
+    });
+    return obj;
+  });
+}
+
+/**
+ * Retrieves the staff book data as a key-value object.
+ * @returns {Object} An object like { "301-350": "Staff Name" }.
+ */
+function getStaffBookAsObject() {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(STAFF_SHEET_NAME);
+  if (!sheet) return {};
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return {}; // No data beyond header
+
+  const staffBook = {};
+  data.slice(1).forEach(row => { // Skip header row
+    if (row[0] && row[1]) { // Ensure both key and value exist
+      staffBook[row[0]] = row[1];
+    }
+  });
+  return staffBook;
+}
+
+/**
+ * Retrieves entry status data as a key-value object where values are arrays.
+ * @returns {Object} An object like { "123": [{ product: 'sherwani', package: true }] }.
+ */
+function getEntryStatusAsObject() {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(STATUS_SHEET_NAME);
+  if (!sheet) return {};
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return {};
+  const entryStatuses = {};
+  data.slice(1).forEach(row => {
+    if (row[0] && row[1]) {
+      try {
+        // The second column contains a JSON string of the statuses array
+        entryStatuses[row[0]] = JSON.parse(row[1]);
+      } catch (e) {
+        // If parsing fails, assign an empty array to avoid app crashes
+        entryStatuses[row[0]] = [];
+      }
+    }
+  });
+  return entryStatuses;
+}
+
+
+// --- DATA MODIFICATION FUNCTIONS ---
+
+/**
+ * Adds a new order or updates an existing one based on the 'sno'.
+ * @param {object} orderData - The order object to save.
+ */
+function addOrUpdateOrder(orderData) {
+  // Fix: Add a check to prevent error when run directly from editor
+  if (!orderData) {
+    Logger.log("addOrUpdateOrder was called without data. This is expected if run directly from the editor. Exiting.");
+    return;
+  }
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(ORDERS_SHEET_NAME);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const snoColumnIndex = headers.indexOf('sno') + 1;
+
+  if (snoColumnIndex === 0) {
+    throw new Error("'sno' column not found in Orders sheet.");
+  }
+
+  const snoList = sheet.getRange(2, snoColumnIndex, sheet.getLastRow(), 1).getValues().flat();
+  const rowIndex = snoList.findIndex(sno => String(sno) == String(orderData.sno));
+
+  const rowData = headers.map(header => orderData[header] || ""); // Ensure order matches headers
+
+  if (rowIndex !== -1) {
+    // Update existing row
+    sheet.getRange(rowIndex + 2, 1, 1, headers.length).setValues([rowData]);
+  } else {
+    // Append new row
+    sheet.appendRow(rowData);
+  }
+}
+
+/**
+ * Clears and rewrites the entire StaffBook sheet with new data.
+ * @param {object} staffBookData - The staff book object.
+ */
+function updateStaffBook(staffBookData) {
+  // Fix: Add a check to prevent error when run directly from editor
+  if (!staffBookData) {
+    Logger.log("updateStaffBook was called without data. This is expected if run directly from the editor. Exiting.");
+    return;
+  }
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(STAFF_SHEET_NAME);
+  
+  // Clear sheet content but keep headers
+  sheet.getRange(2, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearContent();
+
+  const rows = Object.entries(staffBookData).map(([billbook, staff]) => [billbook, staff]);
+
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 2).setValues(rows);
+  }
+}
+
+/**
+ * Clears and rewrites the entire EntryStatus sheet with new data.
+ * @param {object} entryStatusData - The entry status object.
+ */
+function updateEntryStatuses(entryStatusData) {
+  // Fix: Add a check to prevent error when run directly from editor
+  if (!entryStatusData) {
+    Logger.log("updateEntryStatuses was called without data. This is expected if run directly from the editor. Exiting.");
+    return;
+  }
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(STATUS_SHEET_NAME);
+
+  sheet.getRange(2, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearContent();
+
+  const rows = Object.entries(entryStatusData).map(([sno, statuses]) => {
+    // Store the array of statuses as a JSON string
+    return [sno, JSON.stringify(statuses)];
+  });
+
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 2).setValues(rows);
+  }
+}
